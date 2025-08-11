@@ -5,11 +5,25 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"log"
+	"os"
 	"time"
 )
 
 type Storage struct {
 	db *gorm.DB
+}
+
+func testFunc() {
+	fmt.Println("Test")
+	testPrinting()
+
+}
+
+func testPrinting() {
+	if true {
+		const TestingConst = "Test"
+		fmt.Fprint(os.Stdout, TestingConst)
+	}
 }
 
 func New(storagePath string) (*Storage, error) {

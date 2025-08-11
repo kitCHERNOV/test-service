@@ -1,0 +1,9 @@
+services:
+  kafka:
+    image: apache/kafka:latest
+    container_name: kafka
+    hostname: broker
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
