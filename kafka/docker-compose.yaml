@@ -6,4 +6,42 @@ services:
     ports:
       - "9092:9092"
     environment:
-      KAFKA_BROKER_ID: 1
+      KAFKA_PROCESS_ROLES: 'broker, controller' # Т.е. эта нода и брокер и контроллер
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker:29093'
+
+      # LISTENERS — куда биндимся внутри контейнера
+      # PLAINTEXT — для внутренней docker-сети
+      # CONTROLLER — служебный контроллер-кворум
+      # PLAINTEXT_HOST — внешний listener, проброшенный на порт 9092
+      KAFKA_LISTENERS: 'PLAINTEXT://broker:29092, CONTROLLER://broker:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'PLAINTEXT:PLAINTEXT, PLAINTEXT_HOST:PLAINTEXT, CONTROLLER:PLAINTEXT'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+
+        # ADVERTISED_LISTENERS — что отдаём клиентам в metadata
+      # Внутри docker-сети — имя сервиса kafka:29092
+      # С хоста — localhost:9092
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092'
+
+      # Обязательные системные топики и каталоги
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+
+      # Фиксированный Cluster ID (любой валидный base64/UUID формат из примеров)
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - kafka-net
+
+volumes:
+  kafka-data:
+
+networks:
+  kafka-net:
+    driver: bridge

@@ -8,16 +8,18 @@ import (
 	"os"
 )
 
+// TODO: Сохранять поле Broker в config как список string
 // Config структура
 type Config struct {
 	HTTPServer         `yaml:"http_server"`
 	PostgresConnection `yaml:"db_path"`
+	Broker             string `yaml:"broker"`
 }
 
 type PostgresConnection struct {
 	Host     string `yaml:"host"`
-	Port     int    `yaml:"port" env:"DB_NAME" env-required:"true"`
-	DBName   string `yaml:"database" env:"DB_NAME" env-required:"true"`
+	Port     string `yaml:"port" env:"PORT" env-required:"true"`
+	DBName   string `yaml:"dbname" env:"DB_NAME" env-required:"true"`
 	SSLMode  string `yaml:"ssl_mode" env:"SSL_MODE"`
 	Username string `yaml:"username" env:"DB_USER" env-required:"true"`
 	Password string `yaml:"password" env:"DB_PASSWORD" env-required:"true"`

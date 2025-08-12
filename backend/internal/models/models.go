@@ -1,8 +1,10 @@
 package models
 
 import (
+	"gorm.io/gorm"
 	_ "gorm.io/gorm"
 	"net/http"
+	"time"
 )
 
 // Может быть будет эффективно обращаться через интерфейс
@@ -11,9 +13,12 @@ type OrderService interface {
 }
 
 type Order struct {
-	OrderUID    string `gorm:"order_uid" json:"order_uid"`
-	TrackNumber string `gorm:"track_number" json:"track_number"`
-	Entry       string `gorm:"entry" json:"entry"`
+	OrderUID    string         `gorm:"primaryKey" json:"order_uid"`
+	TrackNumber string         `gorm:"size:255;not null" json:"track_number"`
+	Entry       string         `gorm:"" json:"entry"`
+	CreatedAt   time.Time      `gorm:"autoCreateTime"`
+	UpdatedAt   time.Time      `gorm:"autoUpdateTime"`
+	DeletedAt   gorm.DeletedAt `gorm:"index"`
 }
 
 func (o *Order) Load(w http.ResponseWriter, r http.Request) {
