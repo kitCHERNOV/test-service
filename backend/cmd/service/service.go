@@ -59,32 +59,45 @@ func main() {
 	// Подписка на топики:
 	// 1. топик order_id
 	go func() {
-		reader := kafka.NewReader(kafka.ReaderConfig{
+		readerOrderId := kafka.NewReader(kafka.ReaderConfig{
 			// TODO: Сохранять поле Broker в config как список string
 			Brokers: []string{cfg.Broker},
 			Topic:   "order_id",
 		})
 		defer func() {
-			err = reader.Close()
+			err = readerOrderId.Close()
 			if err != nil {
-				log.Fatalf("Failed to close reader: %v", err)
+				log.Fatalf("Failed to close id reader: %v", err)
 			}
 		}()
-		fmt.Println("Servise is ready to get messages")
+		fmt.Println("Log: Servise is ready to get order_id messages")
 		for {
-			msg, err := reader.ReadMessage(context.Background())
+			msg, err := readerOrderId.ReadMessage(context.Background())
 			if err != nil {
 				log.Fatalf("Failed to read message: %v", err)
 			}
-			switch msg.Topic {
-			case "order_id":
-				continue
-			case "json_data":
-				continue
-			case "":
 
+			fmt.Println(string(msg.Value))
+		}
+	}()
+	// 2. топик json_data
+	go func() {
+		readerOrderJson := kafka.NewReader(kafka.ReaderConfig{
+			Brokers: []string{cfg.Broker},
+			Topic:   "json_data",
+		})
+		defer func() {
+			err = readerOrderJson.Close()
+			if err != nil {
+				log.Fatalf("Failed to close json reader: %v", err)
 			}
-
+		}()
+		fmt.Println("Log: Servise is ready to get json_data messages")
+		for {
+			msg, err := readerOrderJson.ReadMessage(context.Background())
+			if err != nil {
+				log.Fatalf("Failed to read message: %v", err)
+			}
 			fmt.Println(string(msg.Value))
 		}
 	}()
