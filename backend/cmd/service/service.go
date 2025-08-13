@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/segmentio/kafka-go"
 	"log"
 	"net"
 	"os"
@@ -11,6 +10,9 @@ import (
 	"strconv"
 	"syscall"
 	"test/internal/config"
+	"test/internal/storage/postgres"
+
+	"github.com/segmentio/kafka-go"
 )
 
 func ensureTopic(broker string, cfg kafka.TopicConfig) error {
@@ -41,10 +43,12 @@ func main() {
 	cfg := config.MustLoad()
 
 	// Получение эземпляра базы данных
-	//storage, err := postgres.New(cfg.PostgresConnection.DataBasePath())
-	//if err != nil {
-	//	log.Fatalf("Failed to connect to database: %v", err)
-	//}
+	storage, err := postgres.New(cfg.PostgresConnection.DataBasePath())
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+
+	_ = storage
 
 	// Организация топиков кафки
 	err = ensureTopic(cfg.Broker, kafka.TopicConfig{
