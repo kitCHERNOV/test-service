@@ -41,9 +41,8 @@ func main() {
 	var err error
 	// Чтение кофигурационных файлов
 	cfg := config.MustLoad()
-
 	// Получение эземпляра базы данных
-	storage, err := postgres.New(cfg.PostgresConnection.DataBasePath())
+	storage, err := postgres.NewInstance(cfg.PostgresConnection.DataBasePath())
 	if err != nil {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}

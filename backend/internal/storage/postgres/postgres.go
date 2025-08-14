@@ -27,7 +27,7 @@ func testPrinting() {
 	}
 }
 
-func New(storagePath string) (*Storage, error) {
+func NewInstance(storagePath string) (*Storage, error) {
 	const op = "storage.postgres.New"
 
 	db, err := gorm.Open(postgres.Open(storagePath), &gorm.Config{})
