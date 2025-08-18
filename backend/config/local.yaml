@@ -2,7 +2,9 @@ http_server:
   address: "localhost:8081"
 db_path:
   host: "localhost"
-  port: "5432"
-  dbname: "test"
+  port: "5431"
+  dbname: "service"
   ssl_mode: "disable"
 broker: "localhost:9092"
+cache_params:
+  amount: 20

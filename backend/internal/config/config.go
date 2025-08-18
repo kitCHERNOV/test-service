@@ -14,6 +14,11 @@ type Config struct {
 	HTTPServer         `yaml:"http_server"`
 	PostgresConnection `yaml:"db_path"`
 	Broker             string `yaml:"broker"`
+	CacheParams        `yaml:"cache_params"`
+}
+
+type CacheParams struct {
+	Amount int `yaml:"amount"`
 }
 
 type PostgresConnection struct {

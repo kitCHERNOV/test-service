@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"syscall"
 	"test/internal/config"
+	"test/internal/handlers/broker"
+	"test/internal/storage/cache"
 	"test/internal/storage/postgres"
 
 	"github.com/segmentio/kafka-go"
@@ -39,6 +41,7 @@ func ensureTopic(broker string, cfg kafka.TopicConfig) error {
 
 func main() {
 	var err error
+	var ctx context.Context = context.Background()
 	// Чтение кофигурационных файлов
 	cfg := config.MustLoad()
 	// Получение эземпляра базы данных
@@ -47,7 +50,13 @@ func main() {
 		log.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	_ = storage
+	// Автоматическая миграция
+	err = storage.AutoMigrate()
+	if err != nil {
+		log.Fatalf("Failed to auto migrate: %v", err)
+	}
+	// Инициализация кэша
+	cacheInstance := cache.InitCache(cfg.CacheParams)
 
 	// Организация топиков кафки
 	err = ensureTopic(cfg.Broker, kafka.TopicConfig{
@@ -67,6 +76,10 @@ func main() {
 			Brokers: []string{cfg.Broker},
 			Topic:   "order_id",
 		})
+		responseWriterOrderID := kafka.Writer{
+			Addr:  kafka.TCP(cfg.Broker),
+			Topic: "order_response",
+		}
 		defer func() {
 			err = readerOrderId.Close()
 			if err != nil {
@@ -80,6 +93,28 @@ func main() {
 				log.Fatalf("Failed to read message: %v", err)
 			}
 
+			// Получим интересуемый ID для поиска данных по заказу
+			orderIdStruct, err := broker.UnmarshalingOrderId(msg.Value)
+			if err != nil {
+				log.Fatalf("Failed to unmarshal id message: %v", err)
+			}
+			var takenData []byte
+			// Постараемся получить сообщение из кэша
+			if order, ok := cacheInstance[orderIdStruct.OrderUID]; ok {
+				takenData, err = broker.MarshalingOrderDataMessages(&order)
+				if err != nil {
+					log.Fatalf("Failed to marshal order: %v", err)
+				}
+			}
+			// Если заказ не был найден в кэше, то найдем его в Базе данных
+			// TODO: Реализовать поиск данных по ключу
+			response := kafka.Message{
+				Value: takenData,
+			}
+			err = responseWriterOrderID.WriteMessages(ctx, response)
+			if err != nil {
+				log.Fatalf("Failed to write message: %v", err)
+			}
 			fmt.Println(string(msg.Value))
 		}
 	}()
@@ -101,7 +136,17 @@ func main() {
 			if err != nil {
 				log.Fatalf("Failed to read message: %v", err)
 			}
-			fmt.Println(string(msg.Value))
+			order, err := broker.UnmarshalingOrderDataMessages(msg.Value)
+			if err != nil {
+				log.Fatalf("Failed to unmarshal json data: %v", err)
+			}
+			// Запись в бд
+			err = storage.NewDataLoad(order)
+			if err != nil {
+				log.Fatalf("Failed to store order: %v", err)
+			}
+			// Сохранение в кэш
+			cacheInstance.CacheItemAdd(order.OrderUID, *order)
 		}
 	}()
 
