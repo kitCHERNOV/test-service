@@ -11,13 +11,14 @@ import (
 	"syscall"
 	"test/internal/config"
 	"test/internal/handlers/broker"
+	"test/internal/models"
 	"test/internal/storage/cache"
 	"test/internal/storage/postgres"
 
 	"github.com/segmentio/kafka-go"
 )
 
-func ensureTopic(broker string, cfg kafka.TopicConfig) error {
+func ensureTopic(broker string, topics ...kafka.TopicConfig) error {
 	conn, err := kafka.Dial("tcp", broker)
 	if err != nil {
 		return err
@@ -36,7 +37,7 @@ func ensureTopic(broker string, cfg kafka.TopicConfig) error {
 	}
 	defer cconn.Close()
 
-	return cconn.CreateTopics(cfg)
+	return cconn.CreateTopics(topics...)
 }
 
 func main() {
@@ -59,11 +60,23 @@ func main() {
 	cacheInstance := cache.InitCache(cfg.CacheParams)
 
 	// Организация топиков кафки
-	err = ensureTopic(cfg.Broker, kafka.TopicConfig{
-		Topic:             "order_id",
-		NumPartitions:     3,
-		ReplicationFactor: 1,
-	})
+	err = ensureTopic(cfg.Broker,
+		kafka.TopicConfig{
+			Topic:             "order_id",
+			NumPartitions:     3,
+			ReplicationFactor: 1,
+		},
+		kafka.TopicConfig{
+			Topic:             "json_data",
+			NumPartitions:     3,
+			ReplicationFactor: 1,
+		},
+		kafka.TopicConfig{
+			Topic:             "order_response",
+			NumPartitions:     3,
+			ReplicationFactor: 1,
+		},
+	)
 	if err != nil {
 		log.Fatalf("Failed to create topic: %v", err)
 	}
@@ -75,6 +88,7 @@ func main() {
 			// TODO: Сохранять поле Broker в config как список string
 			Brokers: []string{cfg.Broker},
 			Topic:   "order_id",
+			GroupID: "order-id-service-consumer",
 		})
 		responseWriterOrderID := kafka.Writer{
 			Addr:  kafka.TCP(cfg.Broker),
@@ -94,20 +108,33 @@ func main() {
 			}
 
 			// Получим интересуемый ID для поиска данных по заказу
-			orderIdStruct, err := broker.UnmarshalingOrderId(msg.Value)
-			if err != nil {
-				log.Fatalf("Failed to unmarshal id message: %v", err)
-			}
+			orderIdStruct := models.OrderID{OrderUID: string(msg.Value)}
+			//orderIdStruct, err := broker.UnmarshalingOrderId(msg.Value)
+			//if err != nil {
+			//	log.Fatalf("Failed to unmarshal id message: %v", err)
+			//}
 			var takenData []byte
 			// Постараемся получить сообщение из кэша
+			// Делаем проверку на существование значения в кэше
 			if order, ok := cacheInstance[orderIdStruct.OrderUID]; ok {
 				takenData, err = broker.MarshalingOrderDataMessages(&order)
 				if err != nil {
 					log.Fatalf("Failed to marshal order: %v", err)
 				}
+			} else {
+				// Если заказ не был найден в кэше, то найдем его в Базе данных
+				// TODO: Реализовать поиск данных по ключу
+				// Поиск данных в бд, возвращаем туже модель models.Order
+				order, err := storage.GetOrderByUID(orderIdStruct.OrderUID)
+				if err != nil {
+					log.Fatalf("Failed to get order: %v", err)
+				}
+				// Преобразование модели models.Order в JSON для отправки в kafka
+				takenData, err = broker.MarshalingOrderDataMessages(order)
+				if err != nil {
+					log.Fatalf("Failed to marshal order: %v", err)
+				}
 			}
-			// Если заказ не был найден в кэше, то найдем его в Базе данных
-			// TODO: Реализовать поиск данных по ключу
 			response := kafka.Message{
 				Value: takenData,
 			}
@@ -123,6 +150,7 @@ func main() {
 		readerOrderJson := kafka.NewReader(kafka.ReaderConfig{
 			Brokers: []string{cfg.Broker},
 			Topic:   "json_data",
+			GroupID: "service-json-data-consumer",
 		})
 		defer func() {
 			err = readerOrderJson.Close()

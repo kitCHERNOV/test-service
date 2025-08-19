@@ -17,8 +17,9 @@ type KafkaProducer struct {
 }
 
 type PageData struct {
-	Message string
-	Status  string
+	Message          string
+	Status           string
+	ResponseMessages []string
 }
 
 // HTML шаблон
@@ -78,6 +79,9 @@ const htmlTemplate = `
             background-color: #f2dede;
             color: #a94442;
         }
+        ul {
+            padding-left: 20px;
+        }
     </style>
 </head>
 <body>
@@ -101,9 +105,22 @@ const htmlTemplate = `
         </div>
         {{end}}
     </div>
+
+    {{if .ResponseMessages}}
+    <h2>Ответы из топика order_response:</h2>
+    <ul>
+    {{range .ResponseMessages}}
+        <li>{{.}}</li>
+    {{end}}
+    </ul>
+    {{end}}
 </body>
 </html>
 `
+
+var (
+	responseMessages = make([]string, 0)
+)
 
 func NewKafkaProducer(brokers []string, topics []string) *KafkaProducer {
 	writers := make(map[string]*kafka.Writer)
@@ -129,43 +146,40 @@ func NewKafkaProducer(brokers []string, topics []string) *KafkaProducer {
 	}
 }
 
+// SendMessage отправляет сырые байты, без обёрток и повторной сериализации.
+// Для json_data (опционально) валидирует, что message — валидный JSON.
 func (kp *KafkaProducer) SendMessage(ctx context.Context, topic, message string) error {
 	writer, exists := kp.writers[topic]
 	if !exists {
 		return fmt.Errorf("writer for topic %s not found", topic)
 	}
 
-	// Создаем сообщение в зависимости от топика
-	var messageValue []byte
-	var err error
+	raw := []byte(message)
 
+	// Опциональная валидация для json_data: убедиться, что это валидный JSON
 	if topic == "json_data" {
-		// Отправляем как JSON
-		jsonData := map[string]interface{}{
-			"data":      message,
-			"timestamp": time.Now().Unix(),
-			"topic":     topic,
-			"id":        fmt.Sprintf("%d", time.Now().UnixNano()),
+		var tmp json.RawMessage
+		if err := json.Unmarshal(raw, &tmp); err != nil {
+			return fmt.Errorf("invalid JSON for topic %s: %w", topic, err)
 		}
-		messageValue, err = json.Marshal(jsonData)
-		if err != nil {
-			return fmt.Errorf("failed to marshal JSON: %w", err)
-		}
-	} else {
-		// Для order_id отправляем как обычную строку
-		messageValue = []byte(message)
 	}
+
+	// Логируем сырые байты для отладки (усекаем до 1KB)
+	logPreview := message
+	if len(logPreview) > 1024 {
+		logPreview = logPreview[:1024] + "...(truncated)"
+	}
+	log.Printf("Sending raw payload to topic %s: %s", topic, logPreview)
 
 	// Создаем Kafka сообщение
 	kafkaMessage := kafka.Message{
 		Key:   []byte(fmt.Sprintf("%d", time.Now().Unix())),
-		Value: messageValue,
+		Value: raw,
 		Time:  time.Now(),
 	}
 
 	// Отправляем сообщение
-	err = writer.WriteMessages(ctx, kafkaMessage)
-	if err != nil {
+	if err := writer.WriteMessages(ctx, kafkaMessage); err != nil {
 		return fmt.Errorf("failed to write message to topic %s: %w", topic, err)
 	}
 
@@ -213,9 +227,35 @@ func checkTopics(brokers []string, topics []string) error {
 	return nil
 }
 
+func startResponseConsumer(brokers []string, topic string) {
+	reader := kafka.NewReader(kafka.ReaderConfig{
+		Brokers: brokers,
+		GroupID: "response-consumer-group",
+		Topic:   topic,
+	})
+
+	go func() {
+		for {
+			msg, err := reader.ReadMessage(context.Background())
+			if err != nil {
+				log.Printf("Failed to read message from %s: %v", topic, err)
+				continue
+			}
+			text := string(msg.Value)
+			log.Printf("Received response message: %s", text)
+
+			// Добавляем в срез (с простым ограничением размера)
+			if len(responseMessages) > 100 {
+				responseMessages = responseMessages[1:]
+			}
+			responseMessages = append(responseMessages, text)
+		}
+	}()
+}
+
 func main() {
 	brokers := []string{"localhost:9092"}
-	topics := []string{"json_data", "order_id"}
+	topics := []string{"json_data", "order_id", "order_response"}
 
 	// Проверяем доступность топиков
 	if err := checkTopics(brokers, topics); err != nil {
@@ -230,6 +270,9 @@ func main() {
 		}
 	}()
 
+	// Запускаем consumer, который слушает order_response и сохраняет сообщения
+	startResponseConsumer(brokers, "order_response")
+
 	// Парсим HTML шаблон
 	tmpl, err := template.New("index").Parse(htmlTemplate)
 	if err != nil {
@@ -238,7 +281,9 @@ func main() {
 
 	// Обработчик главной страницы
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		data := PageData{}
+		data := PageData{
+			ResponseMessages: append([]string(nil), responseMessages...), // копия среза для безопасности
+		}
 
 		if r.Method == "POST" {
 			message := r.FormValue("message")
@@ -255,21 +300,19 @@ func main() {
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 
-				err := kafkaProducer.SendMessage(ctx, topic, message)
-				if err != nil {
+				if err := kafkaProducer.SendMessage(ctx, topic, message); err != nil {
 					data.Status = "error"
 					data.Message = fmt.Sprintf("Ошибка отправки: %v", err)
 					log.Printf("Error sending message: %v", err)
 				} else {
 					data.Status = fmt.Sprintf("Сообщение успешно отправлено в топик '%s'", topic)
-					data.Message = message // Сохраняем сообщение в поле
+					data.Message = message // Сохраняем отправленное сообщение для формы
 				}
 			}
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		err := tmpl.Execute(w, data)
-		if err != nil {
+		if err := tmpl.Execute(w, data); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -279,7 +322,7 @@ func main() {
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]string{
 			"status":    "healthy",
 			"timestamp": time.Now().Format(time.RFC3339),
 		})

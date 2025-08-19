@@ -69,3 +69,19 @@ func (s *Storage) NewDataLoad(order *models.Order) error {
 	})
 	return err
 }
+
+func (s *Storage) GetOrderByUID(orderUID string) (*models.Order, error) {
+	const op = "storage.postgres.GetOrderByUID"
+	var order models.Order
+
+	res := s.db.Preload("Delivery").
+		Preload("Payment").
+		Preload("Items").
+		Where("order_uid = ?", orderUID).First(&order)
+
+	if res.Error != nil {
+		return nil, res.Error
+	}
+
+	return &order, nil
+}
