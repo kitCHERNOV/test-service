@@ -127,16 +127,8 @@ func NewKafkaProducer(brokers []string, topics []string) *KafkaProducer {
 
 	for _, topic := range topics {
 		writer := &kafka.Writer{
-			Addr:         kafka.TCP(brokers...),
-			Topic:        topic,
-			Balancer:     &kafka.LeastBytes{},
-			RequiredAcks: kafka.RequireAll,
-			Async:        false,
-			Compression:  kafka.Snappy,
-			BatchSize:    1,
-			BatchTimeout: 10 * time.Millisecond,
-			WriteTimeout: 10 * time.Second,
-			ReadTimeout:  10 * time.Second,
+			Addr:  kafka.TCP(brokers...),
+			Topic: topic,
 		}
 		writers[topic] = writer
 	}
@@ -332,5 +324,7 @@ func main() {
 	port := ":8080"
 	log.Printf("Server starting on http://localhost%s", port)
 	log.Printf("Health check available at http://localhost%s/health", port)
-	log.Fatal(http.ListenAndServe(port, nil))
+	if err := http.ListenAndServe(port, nil); err != nil {
+		log.Fatalf("Failede to launch server; Error: %v", err)
+	}
 }

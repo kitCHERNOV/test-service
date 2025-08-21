@@ -56,8 +56,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to auto migrate: %v", err)
 	}
-	// Инициализация кэша
-	cacheInstance := cache.InitCache(cfg.CacheParams)
+	// Инициализация кэша (Пробуем востановить, если не получается, то инициализируем новый)
+	var cacheInstance *cache.FifoCache
+	if cacheInstance = cache.RestoreCache(cfg.CacheParams.Path, cfg.CacheParams.Amount, storage); cacheInstance == nil {
+		cacheInstance = cache.NewFifoCache(cfg.CacheParams.Amount)
+	}
 
 	// Организация топиков кафки
 	err = ensureTopic(cfg.Broker,
@@ -116,14 +119,13 @@ func main() {
 			var takenData []byte
 			// Постараемся получить сообщение из кэша
 			// Делаем проверку на существование значения в кэше
-			if order, ok := cacheInstance[orderIdStruct.OrderUID]; ok {
+			if order, ok := cacheInstance.Get(orderIdStruct.OrderUID); ok {
 				takenData, err = broker.MarshalingOrderDataMessages(&order)
 				if err != nil {
 					log.Fatalf("Failed to marshal order: %v", err)
 				}
 			} else {
 				// Если заказ не был найден в кэше, то найдем его в Базе данных
-				// TODO: Реализовать поиск данных по ключу
 				// Поиск данных в бд, возвращаем туже модель models.Order
 				order, err := storage.GetOrderByUID(orderIdStruct.OrderUID)
 				if err != nil {
@@ -174,7 +176,7 @@ func main() {
 				log.Fatalf("Failed to store order: %v", err)
 			}
 			// Сохранение в кэш
-			cacheInstance.CacheItemAdd(order.OrderUID, *order)
+			cacheInstance.Set(cfg, order.OrderUID, *order)
 		}
 	}()
 

@@ -60,7 +60,6 @@ func (s *Storage) AutoMigrate() error {
 func (s *Storage) NewDataLoad(order *models.Order) error {
 	const op = "storage.postgres.NewDataLoad"
 
-	// TODO: Создать полноценное добаление новых записей в бд
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(order).Error; err != nil {
 			return err
@@ -84,4 +83,32 @@ func (s *Storage) GetOrderByUID(orderUID string) (*models.Order, error) {
 	}
 
 	return &order, nil
+}
+
+// Функция для извлечения максимум n-го числа данных
+func (s *Storage) GetDataToRestoreCache(uids []string) (map[string]models.Order, error) {
+	const op = "storage.postgres.GetDataToRestoreCache"
+	// Возвращаемая маппа заказов
+	orders := make(map[string]models.Order)
+
+	if len(uids) == 0 {
+		return orders, nil
+	}
+	// Получаем данные в список
+	var ordersSlice []models.Order
+	result := s.db.Preload("Delivery").
+		Preload("Payment").
+		Preload("Items").
+		Where("order_uid IN (?)", uids).
+		Find(&ordersSlice)
+
+	if result.Error != nil {
+		return nil, fmt.Errorf("Loc:%s: Err:%v", op, result.Error)
+	}
+	// Преобразуем slice в map
+	for _, order := range ordersSlice {
+		orders[order.OrderUID] = order
+	}
+
+	return orders, nil
 }

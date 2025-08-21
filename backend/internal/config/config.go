@@ -18,7 +18,8 @@ type Config struct {
 }
 
 type CacheParams struct {
-	Amount int `yaml:"amount"`
+	Amount int    `yaml:"amount"`
+	Path   string `yaml:"path" env:"CACHE_PATH"`
 }
 
 type PostgresConnection struct {
