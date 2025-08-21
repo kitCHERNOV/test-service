@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Kafka Message Sender</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .form-container {
+            background-color: #f5f5f5;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            margin: 10px 5px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .json-btn {
+            background-color: #008CBA;
+        }
+        .json-btn:hover {
+            background-color: #007B9A;
+        }
+        .status {
+            margin-top: 15px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+        ul {
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body>
+<h1>Kafka Message Sender</h1>
+<div class="form-container">
+    <form method="post">
+        <label for="message">Введите сообщение:</label>
+        <input type="text" id="message" name="message" value="{{.Message}}" required>
+        <div>
+            <button type="submit" name="topic" value="json_data" class="json-btn">
+                Отправить в json_data
+            </button>
+            <button type="submit" name="topic" value="order_id">
+                Отправить в order_id
+            </button>
+        </div>
+    </form>
+    {{if .Status}}
+    <div class="status {{if eq .Status "error"}}error{{else}}success{{end}}">
+    {{.Status}}
+</div>
+{{end}}
+</div>
+
+{{if .ResponseMessages}}
+<h2>Ответы из топика order_response:</h2>
+<ul>
+    {{range .ResponseMessages}}
+    <li>{{.}}</li>
+    {{end}}
+</ul>
+{{end}}
+<script>
+    let messagesContainer;
+
+    function initSSE() {
+        const eventSource = new EventSource('/events');
+
+        eventSource.onmessage = function(event) {
+            showLastMessage(event.data);
+        };
+
+        eventSource.onerror = function(event) {
+            console.error('SSE error:', event);
+        };
+    }
+
+    function showLastMessage(message) {
+        if (!messagesContainer) {
+            // Создаем контейнер только один раз
+            messagesContainer = document.createElement('div');
+            messagesContainer.innerHTML =
+                '<h2>Последний ответ из топика order_response:</h2>' +
+                '<div id="current-message" style="background-color: #e7f3ff; padding: 15px; border-radius: 4px; margin: 10px 0; border: 1px solid #bee5eb;"></div>';
+            document.body.appendChild(messagesContainer);
+        }
+
+        // Заменяем содержимое (не добавляем новое)
+        const messageDiv = document.getElementById('current-message');
+        messageDiv.textContent = message;
+
+        // Добавляем эффект "новое сообщение"
+        messageDiv.style.backgroundColor = '#d4edda';
+        messageDiv.style.borderColor = '#c3e6cb';
+
+        // Через секунду возвращаем обычный цвет
+        setTimeout(() => {
+            messageDiv.style.backgroundColor = '#e7f3ff';
+            messageDiv.style.borderColor = '#bee5eb';
+        }, 1000);
+    }
+
+    document.addEventListener('DOMContentLoaded', initSSE);
+</script>
+
+</body>
+</html>

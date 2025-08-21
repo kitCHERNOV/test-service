@@ -12,6 +12,10 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
+var (
+	messageChan = make(chan string, 100)
+)
+
 type KafkaProducer struct {
 	writers map[string]*kafka.Writer
 }
@@ -23,100 +27,7 @@ type PageData struct {
 }
 
 // HTML шаблон
-const htmlTemplate = `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Kafka Message Sender</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 50px auto;
-            padding: 20px;
-        }
-        .form-container {
-            background-color: #f5f5f5;
-            padding: 20px;
-            border-radius: 8px;
-        }
-        input[type="text"] {
-            width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        button {
-            background-color: #4CAF50;
-            color: white;
-            padding: 10px 20px;
-            margin: 10px 5px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        .json-btn {
-            background-color: #008CBA;
-        }
-        .json-btn:hover {
-            background-color: #007B9A;
-        }
-        .status {
-            margin-top: 15px;
-            padding: 10px;
-            border-radius: 4px;
-        }
-        .success {
-            background-color: #dff0d8;
-            color: #3c763d;
-        }
-        .error {
-            background-color: #f2dede;
-            color: #a94442;
-        }
-        ul {
-            padding-left: 20px;
-        }
-    </style>
-</head>
-<body>
-    <h1>Kafka Message Sender</h1>
-    <div class="form-container">
-        <form method="post">
-            <label for="message">Введите сообщение:</label>
-            <input type="text" id="message" name="message" value="{{.Message}}" required>
-            <div>
-                <button type="submit" name="topic" value="json_data" class="json-btn">
-                    Отправить в json_data
-                </button>
-                <button type="submit" name="topic" value="order_id">
-                    Отправить в order_id
-                </button>
-            </div>
-        </form>
-        {{if .Status}}
-        <div class="status {{if eq .Status "error"}}error{{else}}success{{end}}">
-            {{.Status}}
-        </div>
-        {{end}}
-    </div>
-
-    {{if .ResponseMessages}}
-    <h2>Ответы из топика order_response:</h2>
-    <ul>
-    {{range .ResponseMessages}}
-        <li>{{.}}</li>
-    {{end}}
-    </ul>
-    {{end}}
-</body>
-</html>
-`
+const htmlTemplate = ``
 
 var (
 	responseMessages = make([]string, 0)
@@ -227,20 +138,24 @@ func startResponseConsumer(brokers []string, topic string) {
 	})
 
 	go func() {
+		defer reader.Close()
+
 		for {
 			msg, err := reader.ReadMessage(context.Background())
 			if err != nil {
 				log.Printf("Failed to read message from %s: %v", topic, err)
 				continue
 			}
+
 			text := string(msg.Value)
 			log.Printf("Received response message: %s", text)
 
-			// Добавляем в срез (с простым ограничением размера)
-			if len(responseMessages) > 100 {
-				responseMessages = responseMessages[1:]
+			// Отправляем в SSE канал
+			select {
+			case messageChan <- text:
+			default:
+				log.Println("Message channel is full, dropping message")
 			}
-			responseMessages = append(responseMessages, text)
 		}
 	}()
 }
@@ -266,7 +181,7 @@ func main() {
 	startResponseConsumer(brokers, "order_response")
 
 	// Парсим HTML шаблон
-	tmpl, err := template.New("index").Parse(htmlTemplate)
+	tmpl, err := template.ParseFiles("templates/index.html")
 	if err != nil {
 		log.Fatalf("Failed to parse template: %v", err)
 	}
@@ -318,6 +233,32 @@ func main() {
 			"status":    "healthy",
 			"timestamp": time.Now().Format(time.RFC3339),
 		})
+	})
+
+	http.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+		// Настройка SSE headers
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+
+		// Создаем flusher для принудительной отправки данных
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		// Отправляем сообщения на сайт
+		for {
+			select {
+			case message := <-messageChan:
+				fmt.Fprintf(w, "data: %s\n\n", message)
+				flusher.Flush()
+			case <-r.Context().Done():
+				return
+			}
+		}
 	})
 
 	// Запускаем сервер
